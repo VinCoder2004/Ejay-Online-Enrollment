@@ -218,21 +218,35 @@ async function loadEnrollment() {
   }
 }
 async function createEnrollment() {
-  const reference = `CHMSU-${new Date().getFullYear()}-${Math.floor(Math.random() * 90000 + 10000)}`;
-  const { data, error } = await sb
-    .from("enrollments")
-    .insert({
-      reference,
-      term: TERM,
-      campus: st.anon ? null : cp().name,
-      type: st.anon ? "freshman" : "continuing",
-      program: st.anon ? null : st.profile?.program,
-    })
-    .select()
-    .single();
-  if (error) throw error;
-  st.enr = data;
-  st.docs = [];
+  for (let n = 0; n < 3; n++) {
+    const reference = `CHMSU-${new Date().getFullYear()}-${Math.floor(Math.random() * 90000 + 10000)}`;
+    const { data, error } = await sb
+      .from("enrollments")
+      .insert({
+        reference,
+        term: TERM,
+        campus: st.anon ? null : cp().name,
+        type: st.anon ? "freshman" : "continuing",
+        program: st.anon ? null : st.profile?.program,
+      })
+      .select()
+      .single();
+    if (!error) {
+      st.enr = data;
+      st.docs = [];
+      return;
+    }
+    if (error.code === "23503") {
+      await sb.auth.signOut();
+      st.user = st.profile = st.enr = null;
+      st.anon = false;
+      go("login");
+      toast("Your session expired. Please start again.");
+      throw error;
+    }
+    if (error.code !== "23505") throw error;
+  }
+  throw new Error("Could not generate a reference number");
 }
 async function save(patch) {
   const { data, error } = await sb
@@ -519,8 +533,10 @@ async function enter() {
 async function resume() {
   try {
     if (!st.enr) await createEnrollment();
-  } catch {
-    return toast("Could not start enrollment. Try again.");
+  } catch (e) {
+    if (e?.code !== "23503")
+      toast("Could not start enrollment: " + (e?.message || "try again"));
+    return;
   }
   go(
     st.enr.status !== "draft"
