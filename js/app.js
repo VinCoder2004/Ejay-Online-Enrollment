@@ -1,5 +1,9 @@
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from "./config.js";
 
+let LINK = (location.hash.match(/type=(\w+)/) || [])[1]; // signup, email_change, recovery...
+LINK = ["signup", "email_change", "recovery", "invite"].includes(LINK)
+  ? LINK
+  : null;
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const app = document.querySelector("#app");
 const $ = (s) => document.querySelector(s);
@@ -118,6 +122,7 @@ const st = {
   docs: [],
   anon: false,
   pending: "",
+  recovery: false,
 };
 const flow = () => (st.enr?.type === "continuing" ? FLOW.continuing : FLOW.new);
 const groups = () => flow().filter((k) => OFFICE[k]);
@@ -378,6 +383,9 @@ const S = {
   forgot: () =>
     `${top("Forgot Password", "login")}<main class="wrap"><form class="card" id="forgot" novalidate><h2>Reset password</h2><p class="muted lead">Enter your registered email and we will send a reset link.</p>${field("mail", "Email Address", "email", "yourname@email.com")}<p class="err" id="err"></p><button class="btn" type="submit">SEND RESET LINK</button></form></main>`,
 
+  setpw: () =>
+    `<main class="auth"><section class="brand"><img class="seal" src="${SEAL}" alt="CHMSU seal" /><h1>CARLOS HILADO MEMORIAL<br>STATE UNIVERSITY</h1><p>Online Enrollment</p></section><section class="auth-body"><form class="card" id="setpw" novalidate><h2>Set your password</h2><p class="muted lead">${st.recovery ? "Choose a new password for your account." : "Your email is confirmed. Choose a password so you can log in later."}</p>${field("np", "Password (8+ characters)", "password")}${field("np2", "Confirm Password", "password")}<p class="err" id="err" role="alert"></p><button class="btn" type="submit">SAVE PASSWORD</button></form></section></main>`,
+
   dashboard: () => {
     const p = st.profile || {},
       e = st.enr;
@@ -510,6 +518,11 @@ async function enter() {
   st.user = session?.user || null;
   st.anon = !!st.user?.is_anonymous;
   if (!st.user) return go("login");
+  if (LINK) {
+    st.recovery = LINK === "recovery";
+    LINK = null;
+    return go("setpw");
+  }
   if (st.anon) {
     await loadEnrollment();
     return go("login");
@@ -693,7 +706,9 @@ app.addEventListener("submit", async (ev) => {
       : { error: true };
     busy(btn, false, "LOG IN");
     if (error)
-      return (err.textContent = "Incorrect Student ID, email or password.");
+      return (err.textContent = /not confirmed/i.test(error.message || "")
+        ? "Please confirm your email first. Check your inbox and spam folder."
+        : "Incorrect Student ID, email or password. First-year students log in with their email.");
     await enter();
   }
   if (id === "forgot") {
@@ -705,6 +720,26 @@ app.addEventListener("submit", async (ev) => {
       redirectTo: location.origin + location.pathname,
     });
     ev.target.innerHTML = `<div class="ok-mark" style="margin-left:0">${ic("check")}</div><h2>Check your email</h2><p class="muted lead">If that address is registered, a reset link is on its way.</p><button type="button" class="btn" data-go="login">BACK TO LOG IN</button>`;
+  }
+  if (id === "setpw") {
+    const a = $("#np").value,
+      b = $("#np2").value;
+    let ok = true;
+    if (a.length < 8) {
+      flag("np", "At least 8 characters");
+      ok = false;
+    }
+    if (a !== b) {
+      flag("np2", "Passwords do not match");
+      ok = false;
+    }
+    if (!ok) return;
+    busy(btn, true, "SAVE PASSWORD");
+    const { error } = await sb.auth.updateUser({ password: a });
+    busy(btn, false, "SAVE PASSWORD");
+    if (error) return ($("#err").textContent = error.message);
+    toast("Password saved");
+    return enter();
   }
   if (id === "acct") {
     const em = $("#aemail").value.trim(),
