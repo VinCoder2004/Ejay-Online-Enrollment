@@ -800,3 +800,6 @@ tfoot td {
 .kv .tag {
   flex: none;
 }
+[hidden] {
+  display: none !important;
+}
