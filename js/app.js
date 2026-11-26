@@ -277,10 +277,10 @@ const S = {
       )}</div><button class="btn" data-act="next" data-to="cashier">CONTINUE TO ASSESSMENT</button></main>`,
 
   cashier: () =>
-    `${top("Cashier Assessment", "scholarship")}${stepper(7)}<main class="wrap"><p class="eyebrow">STEP 8 OF 9</p><h2>Enrollment assessment</h2><div class="bill">${fees.map(([a, b]) => `<div><span>${a}</span><strong>${peso(b)}</strong></div>`).join("")}<div class="tot"><span>Total Assessment</span><strong>${peso(total)}</strong></div></div><div class="notice"><strong>Payment is made at the cashier</strong>Submitting does not charge you. Present your reference number at the cashier to settle your fees.</div><button class="btn" data-act="submit">SUBMIT ENROLLMENT</button></main>`,
+    `${top("Cashier Assessment", "scholarship")}${stepper(7)}<main class="wrap"><p class="eyebrow">STEP 8 OF 9</p><h2>Enrollment assessment</h2><div class="bill">${fees.map(([a, b]) => `<div><span>${a}</span><strong>${peso(b)}</strong></div>`).join("")}<div class="tot"><span>Total Assessment</span><strong>${peso(total)}</strong></div></div><div class="notice"><strong>Payment is made at the cashier</strong>Submitting does not charge you. Present your reference number at the cashier to settle your fees.</div>${st.anon ? `<form class="card" id="acct" novalidate><h3>Save your enrollment</h3><p class="muted">Create your account so you can log in later and check your status. We will email you a link to confirm your address.</p>${field("aemail", "Email Address", "email", "name@email.com", st.enr.info?.email || "")}${field("apw", "Password (8+ characters)", "password")}${field("apw2", "Confirm Password", "password")}<p class="err" id="err" role="alert"></p><button class="btn" type="submit">CREATE ACCOUNT &amp; SUBMIT</button></form>` : `<button class="btn" data-act="submit">SUBMIT ENROLLMENT</button>`}</main>`,
 
   summary: () =>
-    `${top("Enrollment Submitted")}${stepper(9)}<main class="wrap"><div class="ok-mark">${ic("check")}</div><p class="eyebrow center">SUBMITTED FOR VERIFICATION</p><h2 class="center">Your enrollment is in</h2><p class="muted center">The registrar will validate your records. Keep your reference number.</p><div class="ref"><span>ENROLLMENT REFERENCE</span><strong>${esc(st.enr.reference)}</strong></div>${summaryCard()}<button class="btn" data-go="com">VIEW CERTIFICATE OF MATRICULATION</button><button class="btn ghost" data-go="${st.anon ? "login" : "dashboard"}" ${st.anon ? 'data-act="logout"' : ""}>${st.anon ? "FINISH" : "GO TO DASHBOARD"}</button></main>`,
+    `${top("Enrollment Submitted")}${stepper(9)}<main class="wrap"><div class="ok-mark">${ic("check")}</div><p class="eyebrow center">SUBMITTED FOR VERIFICATION</p><h2 class="center">Your enrollment is in</h2><p class="muted center">The registrar will validate your records. Keep your reference number.</p>${st.pendingEmail ? `<div class="notice" style="margin-bottom:0"><strong>Confirm your email</strong>We sent a link to ${esc(st.pendingEmail)}. Open it to activate your account, then log in with that email and your password.</div>` : ""}<div class="ref"><span>ENROLLMENT REFERENCE</span><strong>${esc(st.enr.reference)}</strong></div>${summaryCard()}<button class="btn" data-go="com">VIEW CERTIFICATE OF MATRICULATION</button><button class="btn ghost" data-go="${st.anon ? "login" : "dashboard"}" ${st.anon ? 'data-act="logout"' : ""}>${st.anon ? "FINISH" : "GO TO DASHBOARD"}</button></main>`,
 
   com: () => `${top("Certificate of Matriculation", "summary")}<main class="wrap wide"><article class="com"><div class="com-h"><img class="seal" src="${SEAL}" alt="" /><div><span>REPUBLIC OF THE PHILIPPINES</span><h2>CARLOS HILADO MEMORIAL STATE UNIVERSITY</h2><span>${esc(st.enr.campus || "")}</span></div></div>
     <div class="com-t"><strong>CERTIFICATE OF MATRICULATION</strong><span class="muted">${TERM}</span></div>
@@ -333,8 +333,16 @@ async function enter() {
     .select("*")
     .eq("id", st.user.id)
     .maybeSingle();
-  st.profile = data || { full_name: st.user.email, student_no: "" };
   await loadEnrollment();
+  const i = st.enr?.info || {};
+  st.profile = data || {
+    full_name: i.first ? `${i.first} ${i.last}` : st.user.email,
+    student_no: "",
+    campus: st.enr?.campus,
+    program: st.enr?.program,
+    year_level: "1st Year",
+    standing: "New",
+  };
   go("dashboard");
 }
 async function resume() {
@@ -495,6 +503,43 @@ app.addEventListener("submit", async (ev) => {
       redirectTo: location.origin + location.pathname,
     });
     ev.target.innerHTML = `<div class="ok-mark" style="margin-left:0">${ic("check")}</div><h2>Check your email</h2><p class="muted lead">If that address is registered, a reset link is on its way.</p><button type="button" class="btn" data-go="login">BACK TO LOG IN</button>`;
+  }
+  if (id === "acct") {
+    const em = $("#aemail").value.trim(),
+      pw = $("#apw").value,
+      pw2 = $("#apw2").value,
+      err = $("#err");
+    err.textContent = "";
+    let ok = true;
+    if (!/^\S+@\S+\.\S+$/.test(em)) {
+      flag("aemail", "Enter a valid email");
+      ok = false;
+    }
+    if (pw.length < 8) {
+      flag("apw", "At least 8 characters");
+      ok = false;
+    }
+    if (pw !== pw2) {
+      flag("apw2", "Passwords do not match");
+      ok = false;
+    }
+    if (!ok) return;
+    busy(btn, true, "CREATE ACCOUNT & SUBMIT");
+    const { error } = await sb.auth.updateUser(
+      { email: em, password: pw },
+      { emailRedirectTo: location.origin + location.pathname },
+    );
+    if (error) {
+      busy(btn, false, "CREATE ACCOUNT & SUBMIT");
+      return (err.textContent = error.message);
+    }
+    try {
+      await save({ status: "submitted", step: 8, total });
+      st.pendingEmail = em;
+      go("summary");
+    } catch {
+      busy(btn, false, "CREATE ACCOUNT & SUBMIT");
+    }
   }
   if (id === "info") {
     const v = Object.fromEntries(
