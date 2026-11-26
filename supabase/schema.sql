@@ -9,7 +9,7 @@ create table if not exists enrollments (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null default auth.uid() references auth.users on delete cascade,
   reference text unique not null, term text not null,
-  campus text, program text, college text, info jsonb default '{}',
+  campus text, program text, college text, info jsonb default '{}', type text default 'freshman' check (type in ('freshman','transferee','continuing')),
   scholarship boolean default false, step int default 0,
   status text default 'draft' check (status in ('draft','submitted','approved','rejected')),
   total numeric default 0, created_at timestamptz default now()

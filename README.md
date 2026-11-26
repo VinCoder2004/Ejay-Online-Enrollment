@@ -11,6 +11,9 @@ Opening index.html via file:// will not work because it uses ES modules.
 5. Add a student: Authentication > Users > Add user (email + password), then insert a matching row in `profiles`
    (id = that user's UUID, student_no, full_name, email, campus, program, year_level).
 
+## Updating an existing project
+If you ran an older schema.sql, also run `supabase/migration-002.sql` once (adds the `type` column).
+
 ## Notes
 - Progress saves after every step, so users can leave and resume.
 - Uploads go to the private `requirements` bucket under the user's own folder.
