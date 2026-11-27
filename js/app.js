@@ -7,8 +7,11 @@ const app = document.querySelector("#app");
 const $ = (s) => document.querySelector(s);
 const SEAL = "assets/seal.jpeg";
 // Source: CHMSU "1st Semester AY 2026-2027 Enrollment Schedule for Undergraduate Programs"
-const TERM = "1st Semester, AY 2026-2027",
-  FEE = "PHP 125.00";
+// UPDATE THESE EACH TERM when the Registrar posts a new schedule
+const FEE = "PHP 125.00";
+const NEW_TERM = "1st Semester, AY 2027-2028"; // term for incoming first-year students and transferees (update each year)
+const CONT_TERM = "2nd Semester, AY 2026-2027"; // fallback if a student record has no semester / school year
+const TBA = "To be announced by the Registrar";
 
 const OTHER =
   "your campus enrollment area (check your campus announcements for the venue)";
@@ -17,7 +20,7 @@ const CAMPUSES = [
     name: "Talisay (Main) Campus",
     short: "Talisay",
     place: "Talisay City",
-    period: "July 6 - August 7, 2026",
+    period: TBA,
     venue: "the One-Stop-Shop, Function Hall, 3rd Floor, ETG Building",
     programs: [
       ["BS Information Systems", "College of Computer Studies"],
@@ -40,7 +43,7 @@ const CAMPUSES = [
     name: "Alijis Campus",
     short: "Alijis",
     place: "Bacolod City",
-    period: "July 6 - 23, 2026",
+    period: TBA,
     venue: OTHER,
     programs: [
       ["BS Information Systems", "College of Computer Studies"],
@@ -58,7 +61,7 @@ const CAMPUSES = [
     name: "Binalbagan Campus",
     short: "Binalbagan",
     place: "Binalbagan, Negros Occidental",
-    period: "July 6 - August 7, 2026",
+    period: TBA,
     venue: OTHER,
     programs: [
       ["BS Information Technology", "College of Computer Studies"],
@@ -73,7 +76,7 @@ const CAMPUSES = [
     name: "Fortune Towne Campus",
     short: "Fortune Towne",
     place: "Bacolod City",
-    period: "July 6 - August 7, 2026",
+    period: TBA,
     venue: OTHER,
     programs: [
       ["BS Information Systems", "College of Computer Studies"],
@@ -123,6 +126,30 @@ const st = {
   recovery: false,
   linked: false,
 };
+const ORD = ["1st", "2nd", "3rd", "4th", "5th", "6th"];
+// A student last in "2nd Year, 1st Semester" enrolls for "2nd Year, 2nd Semester"; after a 2nd semester they move up a year.
+function nextTerm(p) {
+  const y = parseInt(p?.year_level),
+    a = parseInt(String(p?.school_year || "")),
+    second = /2/.test(p?.semester || "");
+  if (!y || !a || !p?.semester) return null;
+  const ny = second ? y + 1 : y,
+    ns = second ? "1st" : "2nd",
+    na = second ? a + 1 : a;
+  return {
+    year: `${ORD[ny - 1] || ny + "th"} Year`,
+    term: `${ns} Semester, AY ${na}-${na + 1}`,
+  };
+}
+const nt = () => (st.linked ? nextTerm(st.profile) : null);
+const termNow = () => (st.linked ? nt()?.term || CONT_TERM : NEW_TERM);
+const termShow = () => st.enr?.term || termNow();
+const yearShow = () =>
+  st.linked || st.enr?.type === "continuing"
+    ? st.enr?.info?.year_level || nt()?.year || st.profile?.year_level || "-"
+    : st.enr?.type === "transferee"
+      ? "To be assigned"
+      : "1st Year";
 const flow = () => (st.enr?.type === "continuing" ? FLOW.continuing : FLOW.new);
 const groups = () => flow().filter((k) => OFFICE[k]);
 const has = (k) => st.docs.some((d) => d.kind === k);
@@ -205,12 +232,13 @@ const bring = () =>
 
 /* ---------- data layer ---------- */
 async function loadEnrollment() {
-  const { data } = await sb
+  let q = sb
     .from("enrollments")
     .select("*")
-    .eq("term", TERM)
     .order("created_at", { ascending: false })
     .limit(1);
+  if (st.linked) q = q.eq("term", termNow());
+  const { data } = await q;
   st.enr = data?.[0] || null;
   st.docs = [];
   if (st.enr) {
@@ -228,7 +256,10 @@ async function createEnrollment() {
       .from("enrollments")
       .insert({
         reference,
-        term: TERM,
+        term: termNow(),
+        info: st.anon
+          ? {}
+          : { year_level: nt()?.year || st.profile?.year_level || null },
         campus: st.anon ? null : cp().name,
         type: st.anon ? "freshman" : "continuing",
         program: st.anon ? null : st.profile?.program,
@@ -334,7 +365,7 @@ const head = (g) => {
   return `${top(LABEL[g] === "Admission" ? "Admission Details" : LABEL[g], n ? flow()[n - 1] : st.anon ? "welcome" : "dashboard")}${stepper(n)}`;
 };
 const summaryCard = () =>
-  `<div class="card kv"><div><span>Applicant</span><strong>${esc(who())}</strong></div><div><span>Type</span><strong>${TYPES[st.enr.type]}</strong></div><div><span>Program</span><strong>${esc(st.enr.program || "-")}</strong></div><div><span>Campus</span><strong>${esc(cp().name)}</strong></div><div><span>Term</span><strong>${TERM}</strong></div></div>`;
+  `<div class="card kv"><div><span>Applicant</span><strong>${esc(who())}</strong></div><div><span>Type</span><strong>${TYPES[st.enr.type]}</strong></div><div><span>Year level</span><strong>${esc(yearShow())}</strong></div><div><span>Program</span><strong>${esc(st.enr.program || "-")}</strong></div><div><span>Campus</span><strong>${esc(cp().name)}</strong></div><div><span>Term</span><strong>${esc(termShow())}</strong></div></div>`;
 const bullets = (a) =>
   `<ul style="margin:8px 0 0;padding-left:18px">${a.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>`;
 const officeStatus = (g) =>
@@ -397,11 +428,14 @@ const S = {
         ? "CONTINUE ENROLLMENT"
         : "VIEW ENROLLMENT";
     return `<section class="hero"><div class="hero-in"><div class="bar"><div><img src="${SEAL}" alt="" />CHMSU SIS</div><button data-act="logout">Log out</button></div><p>Good day,</p><h1>${esc(p.full_name)}</h1><p>${esc(p.student_no || "")} ${p.program ? "&middot; " + esc(p.program) : ""}</p></div></section>
-    <main class="wrap wide" style="margin-top:-20px"><div class="card term"><div><span>CURRENT TERM</span><strong>${TERM}</strong></div><span class="tag ok">${cp().short}</span></div>
+    <main class="wrap wide" style="margin-top:-20px"><div class="card term"><div><span>ENROLLING FOR</span><strong>${esc(yearShow())} &middot; ${esc(termShow())}</strong></div><span class="tag ok">${cp().short}</span></div>
       <h2 class="sec">Enrollment</h2><div class="card"><h3>Continuing student enrollment</h3><p class="muted" style="margin:4px 0 14px">${e ? `Reference ${esc(e.reference)} &middot; Status: <b>${esc(e.status)}</b>` : "Upload your clearance and medical requirements, then visit the One-Stop-Shop on your assigned schedule."}</p><button class="btn sm" data-act="resume">${label}</button></div>
       <div class="notice" style="margin-top:14px"><strong>Enrollment period: ${cp().period}</strong>Visit only on your assigned schedule at ${cp().venue}.</div>
       <h2 class="sec">Student record</h2><div class="grid">${[
-        ["Year Level", p.year_level || "-"],
+        [
+          "Current standing",
+          [p.year_level, p.semester].filter(Boolean).join(" · ") || "-",
+        ],
         ["Campus", cp().short],
         ["Standing", p.standing || "-"],
         ["Program", p.program || "-"],
@@ -488,8 +522,8 @@ const S = {
     <button class="btn" style="margin-top:18px" data-go="slip">VIEW PRE-ENROLLMENT SLIP</button><button class="btn ghost" ${st.anon ? 'data-act="logout"' : 'data-go="dashboard"'}>${st.anon ? "FINISH" : "GO TO DASHBOARD"}</button></main>`,
 
   slip: () => `${top("Pre-Enrollment Slip", "summary")}<main class="wrap wide"><article class="com"><div class="com-h"><img class="seal" src="${SEAL}" alt="" /><div><span>REPUBLIC OF THE PHILIPPINES</span><h2>CARLOS HILADO MEMORIAL STATE UNIVERSITY</h2><span>${esc(cp().name)}</span></div></div>
-    <div class="com-t"><strong>PRE-ENROLLMENT SLIP</strong><span class="muted">${TERM}</span></div>
-    <div class="meta"><div><span>Applicant</span><strong>${esc(who())}</strong></div><div><span>Type</span><strong>${TYPES[st.enr.type]}</strong></div><div><span>Program</span><strong>${esc(st.enr.program || "-")}</strong></div><div><span>Reference</span><strong>${esc(st.enr.reference)}</strong></div></div>
+    <div class="com-t"><strong>PRE-ENROLLMENT SLIP</strong><span class="muted">${esc(termShow())}</span></div>
+    <div class="meta"><div><span>Applicant</span><strong>${esc(who())}</strong></div><div><span>Type</span><strong>${TYPES[st.enr.type]}</strong></div><div><span>Year level</span><strong>${esc(yearShow())}</strong></div><div><span>Program</span><strong>${esc(st.enr.program || "-")}</strong></div><div><span>Reference</span><strong>${esc(st.enr.reference)}</strong></div></div>
     <table><thead><tr><th>Office</th><th>Status</th></tr></thead><tbody>${groups()
       .map(
         (g) => `<tr><td>${OFFICE[g]}</td><td>${officeStatus(g)[1]}</td></tr>`,
@@ -535,6 +569,7 @@ async function enter() {
     .eq("id", st.user.id)
     .maybeSingle();
   st.linked = !!data;
+  st.profile = data || null;
   await loadEnrollment();
   const i = st.enr?.info || {};
   st.profile = data || {
@@ -657,18 +692,16 @@ app.addEventListener("change", async (ev) => {
       .from("requirements")
       .upload(path, f, { contentType: f.type || undefined });
     if (up.error) throw up.error;
-    const { error } = await sb
-      .from("documents")
-      .upsert(
-        {
-          enrollment_id: st.enr.id,
-          kind: t.dataset.kind,
-          label: t.dataset.label,
-          file_path: path,
-          status: "pending",
-        },
-        { onConflict: "enrollment_id,kind" },
-      );
+    const { error } = await sb.from("documents").upsert(
+      {
+        enrollment_id: st.enr.id,
+        kind: t.dataset.kind,
+        label: t.dataset.label,
+        file_path: path,
+        status: "pending",
+      },
+      { onConflict: "enrollment_id,kind" },
+    );
     if (error) throw error;
     const r = await sb
       .from("documents")
