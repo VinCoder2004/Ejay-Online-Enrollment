@@ -1,9 +1,7 @@
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from "./config.js";
 
 let LINK = (location.hash.match(/type=(\w+)/) || [])[1]; // signup, email_change, recovery...
-LINK = ["signup", "email_change", "recovery", "invite"].includes(LINK)
-  ? LINK
-  : null;
+LINK = ["email_change", "recovery", "invite"].includes(LINK) ? LINK : null;
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const app = document.querySelector("#app");
 const $ = (s) => document.querySelector(s);
@@ -123,6 +121,7 @@ const st = {
   anon: false,
   pending: "",
   recovery: false,
+  linked: false,
 };
 const flow = () => (st.enr?.type === "continuing" ? FLOW.continuing : FLOW.new);
 const groups = () => flow().filter((k) => OFFICE[k]);
@@ -376,12 +375,15 @@ const S = {
     <section class="auth-body"><form class="card" id="login" novalidate><h2>Welcome back</h2><p class="muted">Continuing students: log in with your Student ID or email.</p>
       ${field("who", "Student ID or Email", "text", "e.g. 2023-0045")}
       <label class="field"><span>Password</span><span class="pw"><input id="pw" type="password" placeholder="Enter your password" autocomplete="current-password" /><button type="button" data-act="eye" aria-label="Show password">${ic("eye")}</button></span></label>
-      <p class="err" id="err" role="alert"></p><button class="btn" type="submit">LOG IN</button><p class="center" style="margin-top:14px"><button type="button" class="link" data-go="forgot">Forgot password?</button></p></form>
+      <p class="err" id="err" role="alert"></p><button class="btn" type="submit">LOG IN</button><p class="center" style="margin-top:14px"><button type="button" class="link" data-go="forgot">Forgot password?</button></p><p class="center muted" style="margin-top:10px">First time logging in? <button type="button" class="link" data-go="activate">Activate your account</button></p></form>
       <div class="divider"><span>or</span></div>
       <div class="promo"><h3>Qualified for admission?</h3><p>Incoming first-year students and transferees can start their enrollment here. No student account is needed yet.</p><button class="btn orange" data-act="freshman">ENROLL AS FIRST-YEAR / TRANSFEREE</button></div>
       <p class="muted center" style="margin-top:22px;font-size:11px">&copy; 2026 CHMSU Student Information System</p></section></main>`,
   forgot: () =>
     `${top("Forgot Password", "login")}<main class="wrap"><form class="card" id="forgot" novalidate><h2>Reset password</h2><p class="muted lead">Enter your registered email and we will send a reset link.</p>${field("mail", "Email Address", "email", "yourname@email.com")}<p class="err" id="err"></p><button class="btn" type="submit">SEND RESET LINK</button></form></main>`,
+
+  activate: () =>
+    `${top("Activate Account", "login")}<main class="wrap"><form class="card" id="activate" novalidate><h2>Activate your account</h2><p class="muted lead">For currently enrolled students. Your details must match the Registrar's student record.</p>${field("sid", "Student ID", "text", "e.g. 2024-0001")}${field("sdob", "Date of Birth", "date")}${field("semail", "Email Address", "email", "name@email.com")}${field("spw", "Password (8+ characters)", "password")}${field("spw2", "Confirm Password", "password")}<p class="err" id="err" role="alert"></p><button class="btn" type="submit">ACTIVATE ACCOUNT</button></form></main>`,
 
   setpw: () =>
     `<main class="auth"><section class="brand"><img class="seal" src="${SEAL}" alt="CHMSU seal" /><h1>CARLOS HILADO MEMORIAL<br>STATE UNIVERSITY</h1><p>Online Enrollment</p></section><section class="auth-body"><form class="card" id="setpw" novalidate><h2>Set your password</h2><p class="muted lead">${st.recovery ? "Choose a new password for your account." : "Your email is confirmed. Choose a password so you can log in later."}</p>${field("np", "Password (8+ characters)", "password")}${field("np2", "Confirm Password", "password")}<p class="err" id="err" role="alert"></p><button class="btn" type="submit">SAVE PASSWORD</button></form></section></main>`,
@@ -532,6 +534,7 @@ async function enter() {
     .select("*")
     .eq("id", st.user.id)
     .maybeSingle();
+  st.linked = !!data;
   await loadEnrollment();
   const i = st.enr?.info || {};
   st.profile = data || {
@@ -544,6 +547,10 @@ async function enter() {
   go("dashboard");
 }
 async function resume() {
+  if (!st.anon && !st.enr && !st.linked)
+    return toast(
+      "Your account is not linked to a student record. Activate it with your Student ID first.",
+    );
   try {
     if (!st.enr) await createEnrollment();
   } catch (e) {
@@ -720,6 +727,58 @@ app.addEventListener("submit", async (ev) => {
       redirectTo: location.origin + location.pathname,
     });
     ev.target.innerHTML = `<div class="ok-mark" style="margin-left:0">${ic("check")}</div><h2>Check your email</h2><p class="muted lead">If that address is registered, a reset link is on its way.</p><button type="button" class="btn" data-go="login">BACK TO LOG IN</button>`;
+  }
+  if (id === "activate") {
+    const sid = $("#sid").value.trim(),
+      dob = $("#sdob").value,
+      em = $("#semail").value.trim(),
+      pw = $("#spw").value,
+      pw2 = $("#spw2").value,
+      err = $("#err");
+    err.textContent = "";
+    let ok = true;
+    if (!sid) {
+      flag("sid", "Required");
+      ok = false;
+    }
+    if (!dob) {
+      flag("sdob", "Required");
+      ok = false;
+    }
+    if (!/^\S+@\S+\.\S+$/.test(em)) {
+      flag("semail", "Enter a valid email");
+      ok = false;
+    }
+    if (pw.length < 8) {
+      flag("spw", "At least 8 characters");
+      ok = false;
+    }
+    if (pw !== pw2) {
+      flag("spw2", "Passwords do not match");
+      ok = false;
+    }
+    if (!ok) return;
+    busy(btn, true, "ACTIVATE ACCOUNT");
+    const c = await sb.rpc("check_student", { sid, dob });
+    if (c.error || c.data !== "ok") {
+      busy(btn, false, "ACTIVATE ACCOUNT");
+      return (err.textContent =
+        c.data === "activated"
+          ? "This student record is already activated. Please log in instead."
+          : "We could not match that Student ID and birthdate. Check them or visit the Registrar.");
+    }
+    const { data, error } = await sb.auth.signUp({
+      email: em,
+      password: pw,
+      options: {
+        data: { student_no: sid, dob },
+        emailRedirectTo: location.origin + location.pathname,
+      },
+    });
+    busy(btn, false, "ACTIVATE ACCOUNT");
+    if (error) return (err.textContent = error.message);
+    if (data.session) return enter();
+    ev.target.innerHTML = `<div class="ok-mark" style="margin-left:0">${ic("check")}</div><h2>Check your email</h2><p class="muted lead">We sent a confirmation link to ${esc(em)}. Open it, then log in with your Student ID or email.</p><button type="button" class="btn" data-go="login">BACK TO LOG IN</button>`;
   }
   if (id === "setpw") {
     const a = $("#np").value,
